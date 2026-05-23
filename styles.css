@@ -265,6 +265,34 @@ body {
   100% { box-shadow: var(--shadow-blue); }
 }
 
+/* ERROR BANNER */
+.error-banner {
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 84, 112, 0.08);
+  border: 1px solid rgba(255, 84, 112, 0.35);
+  color: #ffd8df;
+  font-size: 13.5px;
+  display: flex; align-items: flex-start; gap: 10px;
+  animation: fade .2s ease;
+}
+.error-banner::before {
+  content: '⚠';
+  color: var(--red);
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.error-banner code {
+  font-family: var(--mono);
+  background: rgba(0,0,0,0.3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #ffb6c1;
+}
+
 /* SKELETON */
 .skeleton .card-price,
 .skeleton .card-code,

@@ -112,30 +112,85 @@
     }
   }
 
+  async function fetchWithTimeout(url, ms = 8000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Returns ratesPerBase[X] = how many X per 1 ILS.
+  const FX_SOURCES = [
+    {
+      name: 'open.er-api.com',
+      url: `https://open.er-api.com/v6/latest/${BASE}`,
+      parse: (d) => {
+        if (!d || !d.rates) throw new Error('payload missing "rates"');
+        return { rates: d.rates, ts: d.time_last_update_unix ? new Date(d.time_last_update_unix * 1000) : new Date() };
+      },
+    },
+    {
+      name: 'jsdelivr currency-api',
+      url: `https://cdn.jsdelivr.net/npm/@fawazahmed/currency-api@latest/v1/currencies/${BASE.toLowerCase()}.json`,
+      parse: (d) => {
+        const inner = d && d[BASE.toLowerCase()];
+        if (!inner) throw new Error('payload missing currency block');
+        const rates = {};
+        for (const k of Object.keys(inner)) rates[k.toUpperCase()] = inner[k];
+        return { rates, ts: d.date ? new Date(d.date) : new Date() };
+      },
+    },
+  ];
+
+  function showFxError(msg, sourceErrors) {
+    const banner = $('#fx-error');
+    if (!msg) { banner.hidden = true; banner.innerHTML = ''; return; }
+    let detail = '';
+    if (sourceErrors && sourceErrors.length) {
+      detail = '<div style="margin-top:6px;font-size:12px;opacity:0.85;">'
+        + sourceErrors.map(e => `<div><code>${e.name}</code>: ${escapeHtml(e.message)}</div>`).join('')
+        + '</div>';
+    }
+    banner.innerHTML = `<div><strong>${escapeHtml(msg)}</strong>${detail}</div>`;
+    banner.hidden = false;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
   async function fetchFx() {
     setStatus(null, 'Fetching rates…');
-    try {
-      const res = await fetch(`https://open.er-api.com/v6/latest/${BASE}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
-      if (data.result !== 'success' && !data.rates) throw new Error('Bad payload');
-      // API returns rates[X] = how many X per 1 ILS. We want ILS per 1 X = 1 / rates[X].
-      const ratesPerILS = data.rates;
-      const ilsPer = {};
-      for (const c of CURRENCIES) {
-        const r = ratesPerILS[c.code];
-        if (r && isFinite(r) && r > 0) ilsPer[c.code] = 1 / r;
+    showFxError(null);
+    const errors = [];
+    for (const src of FX_SOURCES) {
+      try {
+        const res = await fetchWithTimeout(src.url, 8000);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const { rates, ts } = src.parse(data);
+        const ilsPer = {};
+        for (const c of CURRENCIES) {
+          const r = rates[c.code];
+          if (r && isFinite(r) && r > 0) ilsPer[c.code] = 1 / r;
+        }
+        if (Object.keys(ilsPer).length === 0) throw new Error('no matching currencies in response');
+        state.fxOnline = true;
+        renderFx(ilsPer, ts, true);
+        setStatus(true, `Live · ${fmtTime()}`);
+        return;
+      } catch (err) {
+        const msg = err?.name === 'AbortError' ? 'timeout after 8s' : (err?.message || String(err));
+        console.warn('FX source failed:', src.name, msg, err);
+        errors.push({ name: src.name, message: msg });
       }
-      const ts = data.time_last_update_unix ? new Date(data.time_last_update_unix * 1000) : new Date();
-      state.fxOnline = true;
-      renderFx(ilsPer, ts, true);
-      setStatus(true, `Live · ${fmtTime()}`);
-    } catch (err) {
-      console.warn('FX fetch failed', err);
-      state.fxOnline = false;
-      renderFxError();
-      setStatus(false, 'Rates offline');
     }
+    state.fxOnline = false;
+    renderFxError();
+    showFxError("Couldn't load exchange rates from any source.", errors);
+    setStatus(false, 'Rates offline');
   }
 
   function renderFx(ilsPer, ts, animate) {
@@ -234,7 +289,7 @@
   async function fetchOneStock(symbol) {
     // Yahoo Finance public chart endpoint — works cross-origin from browsers.
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
-    const res = await fetch(url, { cache: 'no-store' });
+    const res = await fetchWithTimeout(url, 8000);
     if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + symbol);
     const data = await res.json();
     const r = data?.chart?.result?.[0];
