@@ -100,9 +100,10 @@
       </div>
 
       <form id="wallet-form" class="wallet-form" novalidate>
-        <input name="name" type="text" placeholder="Asset name (e.g. Savings)" required maxlength="60" />
-        <input name="value" type="number" inputmode="decimal" step="any" min="0" placeholder="Value ₪" required />
-        <button class="btn primary" type="submit">Add</button>
+        <input name="name" type="text" placeholder="Asset or purchase (e.g. Savings, Coffee)" required maxlength="60" />
+        <input name="value" type="number" inputmode="decimal" step="any" min="0" placeholder="Amount ₪" required />
+        <button class="btn primary" type="submit" data-action="add">+ Add</button>
+        <button class="btn danger" type="submit" data-action="less">− Less</button>
       </form>
 
       <ul id="wallet-list" class="wallet-list-simple"></ul>

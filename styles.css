@@ -335,11 +335,13 @@ body {
 .summary-value {
   display: block; margin-top: 6px;
   font-family: var(--mono); font-size: 34px; font-weight: 700; letter-spacing: -0.01em;
+  transition: color .2s ease;
 }
+.summary-value.negative { color: var(--red); }
 
 .wallet-form {
   display: grid;
-  grid-template-columns: 1fr 160px auto;
+  grid-template-columns: 1fr 160px auto auto;
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -367,14 +369,27 @@ body {
   padding: 14px 18px;
   background: linear-gradient(180deg, rgba(13, 27, 42, 0.6), rgba(10, 10, 15, 0.5));
   border: 1px solid var(--border);
+  border-left-width: 4px;
   border-radius: var(--radius-sm);
   transition: border-color .2s ease, background .2s ease;
   animation: slideIn .2s ease;
 }
+.wallet-list-simple li.kind-in  { border-left-color: var(--blue);  background: linear-gradient(180deg, rgba(30, 144, 255, 0.07), rgba(10, 10, 15, 0.5)); }
+.wallet-list-simple li.kind-out { border-left-color: var(--red);   background: linear-gradient(180deg, rgba(255, 84, 112, 0.07), rgba(10, 10, 15, 0.5)); }
 @keyframes slideIn { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none;} }
 .wallet-list-simple li:hover { border-color: var(--border-strong); }
+.wallet-list-simple .badge {
+  display: inline-grid; place-items: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  font-weight: 800; font-size: 14px;
+  flex-shrink: 0;
+}
+.wallet-list-simple .kind-in  .badge { background: rgba(30, 144, 255, 0.18); color: var(--blue-2); }
+.wallet-list-simple .kind-out .badge { background: rgba(255, 84, 112, 0.18); color: var(--red); }
 .wallet-list-simple .name { flex: 1; font-weight: 600; word-break: break-word; }
-.wallet-list-simple .val { font-family: var(--mono); font-weight: 700; color: var(--blue-2); }
+.wallet-list-simple .val { font-family: var(--mono); font-weight: 700; }
+.wallet-list-simple .kind-in  .val { color: var(--blue-2); }
+.wallet-list-simple .kind-out .val { color: var(--red); }
 .wallet-list-simple .del {
   background: transparent; border: none; color: var(--muted);
   cursor: pointer; padding: 6px; border-radius: 6px;
@@ -390,7 +405,7 @@ body {
 
 @media (max-width: 560px) {
   .wallet-form { grid-template-columns: 1fr 1fr; }
-  .wallet-form button { grid-column: 1 / -1; }
+  .wallet-form input[name="name"] { grid-column: 1 / -1; }
   .summary-value { font-size: 28px; }
 }
 

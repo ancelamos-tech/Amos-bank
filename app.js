@@ -386,13 +386,15 @@
   }
 
   // ---------- WALLET (simplified) ----------
-  const WALLET_KEY = 'amosmoney.wallet.v2';
+  const WALLET_KEY = 'amosmoney.wallet.v3';
 
   function loadWallet() {
     try {
       const raw = localStorage.getItem(WALLET_KEY);
-      state.wallet = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(state.wallet)) state.wallet = [];
+      const parsed = raw ? JSON.parse(raw) : [];
+      state.wallet = Array.isArray(parsed)
+        ? parsed.map(e => ({ ...e, kind: e.kind === 'out' ? 'out' : 'in' }))
+        : [];
     } catch {
       state.wallet = [];
     }
@@ -401,23 +403,33 @@
     try { localStorage.setItem(WALLET_KEY, JSON.stringify(state.wallet)); } catch {}
   }
 
-  const fmtILS = (n) => '₪ ' + fmtNum(n, 2);
+  const fmtILS = (n) => '₪ ' + fmtNum(Math.abs(n), 2);
 
   function renderWallet() {
     const list = $('#wallet-list');
     const empty = $('#wallet-empty');
     list.innerHTML = '';
 
-    const total = state.wallet.reduce((s, h) => s + (Number(h.value) || 0), 0);
-    $('#wallet-total').textContent = fmtILS(total);
+    const total = state.wallet.reduce((s, h) => {
+      const v = Number(h.value) || 0;
+      return s + (h.kind === 'out' ? -v : v);
+    }, 0);
+
+    const totalEl = $('#wallet-total');
+    totalEl.textContent = (total < 0 ? '− ' : '') + fmtILS(total);
+    totalEl.classList.toggle('negative', total < 0);
 
     empty.hidden = state.wallet.length > 0;
 
     for (const h of state.wallet) {
+      const isOut = h.kind === 'out';
+      const sign = isOut ? '−' : '+';
       const li = document.createElement('li');
+      li.className = isOut ? 'kind-out' : 'kind-in';
       li.innerHTML = `
+        <span class="badge" aria-label="${isOut ? 'Spent' : 'Added'}">${sign}</span>
         <span class="name"></span>
-        <span class="val">${fmtILS(Number(h.value) || 0)}</span>
+        <span class="val">${sign} ${fmtILS(Number(h.value) || 0)}</span>
         <button class="del" aria-label="Delete">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         </button>
@@ -433,15 +445,20 @@
   }
 
   const walletForm = $('#wallet-form');
+  let pendingKind = 'in';
+  walletForm.querySelectorAll('button[type="submit"]').forEach(b => {
+    b.addEventListener('click', () => { pendingKind = b.dataset.action === 'less' ? 'out' : 'in'; });
+  });
   walletForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const name = walletForm.elements.name.value.trim();
     const value = Number(walletForm.elements.value.value);
-    if (!name || !isFinite(value) || value < 0) return;
-    state.wallet.push({ id: uid(), name, value });
+    if (!name || !isFinite(value) || value <= 0) return;
+    state.wallet.push({ id: uid(), name, value, kind: pendingKind });
     saveWallet();
     renderWallet();
     walletForm.reset();
+    pendingKind = 'in';
     walletForm.elements.name.focus();
   });
 
