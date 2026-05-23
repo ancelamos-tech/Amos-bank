@@ -4,6 +4,8 @@
   // ---------- CONFIG ----------
   const REFRESH_MS = 60_000;
 
+  // ILS is the base — display "1 X = ? ILS" for each of these.
+  const BASE = 'ILS';
   const CURRENCIES = [
     { code: 'USD', name: 'US Dollar',          flag: 'US' },
     { code: 'EUR', name: 'Euro',               flag: 'EU' },
@@ -12,7 +14,6 @@
     { code: 'CHF', name: 'Swiss Franc',        flag: 'CH' },
     { code: 'CAD', name: 'Canadian Dollar',    flag: 'CA' },
     { code: 'AUD', name: 'Australian Dollar',  flag: 'AU' },
-    { code: 'ILS', name: 'Israeli Shekel',     flag: 'IL' },
   ];
 
   const STOCKS = [
@@ -104,7 +105,7 @@
         <div class="card-price"><span class="value">—</span></div>
         <div class="card-foot">
           <span class="change flat">—</span>
-          <span class="muted">per 1 USD</span>
+          <span class="muted">1 ${c.code} → ILS</span>
         </div>
       `;
       grid.appendChild(card);
@@ -114,14 +115,20 @@
   async function fetchFx() {
     setStatus(null, 'Fetching rates…');
     try {
-      const res = await fetch('https://open.er-api.com/v6/latest/USD', { cache: 'no-store' });
+      const res = await fetch(`https://open.er-api.com/v6/latest/${BASE}`, { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if (data.result !== 'success' && !data.rates) throw new Error('Bad payload');
-      const rates = data.rates;
+      // API returns rates[X] = how many X per 1 ILS. We want ILS per 1 X = 1 / rates[X].
+      const ratesPerILS = data.rates;
+      const ilsPer = {};
+      for (const c of CURRENCIES) {
+        const r = ratesPerILS[c.code];
+        if (r && isFinite(r) && r > 0) ilsPer[c.code] = 1 / r;
+      }
       const ts = data.time_last_update_unix ? new Date(data.time_last_update_unix * 1000) : new Date();
       state.fxOnline = true;
-      renderFx(rates, ts, true);
+      renderFx(ilsPer, ts, true);
       setStatus(true, `Live · ${fmtTime()}`);
     } catch (err) {
       console.warn('FX fetch failed', err);
@@ -131,11 +138,11 @@
     }
   }
 
-  function renderFx(rates, ts, animate) {
+  function renderFx(ilsPer, ts, animate) {
     const grid = $('#fx-grid');
     grid.innerHTML = '';
     for (const c of CURRENCIES) {
-      const rate = c.code === 'USD' ? 1 : rates[c.code];
+      const rate = ilsPer[c.code]; // ILS per 1 unit of c.code
       const prev = state.fx[c.code]?.rate;
       state.fx[c.code] = { rate, prev };
 
@@ -148,17 +155,14 @@
       if (prev != null && rate != null && prev !== rate) {
         const diff = rate - prev;
         const pct = (diff / prev) * 100;
-        const up = diff > 0;
-        // For FX vs USD, "up" in the rate means the currency weakened — invert visual semantics
-        // so up arrow = strengthening currency (i.e., 1 unit buys more USD).
-        const strengthens = c.code === 'USD' ? false : diff < 0;
-        const cls = c.code === 'USD' ? 'flat' : (strengthens ? 'up' : 'down');
-        const arrow = c.code === 'USD' ? '' : (strengthens ? '▲' : '▼');
+        const up = diff > 0; // rate up = currency strengthened against ILS
+        const cls = up ? 'up' : 'down';
+        const arrow = up ? '▲' : '▼';
         changeHtml = `<span class="change ${cls}">${arrow} ${Math.abs(pct).toFixed(3)}%</span>`;
-        if (animate && c.code !== 'USD') flashClass = strengthens ? 'flash-up' : 'flash-down';
+        if (animate) flashClass = up ? 'flash-up' : 'flash-down';
       }
 
-      const display = c.code === 'USD' ? '1.0000' : fmtNum(rate, c.code === 'JPY' ? 2 : 4);
+      const display = rate != null ? '₪ ' + fmtNum(rate, 4) : '—';
 
       card.innerHTML = `
         <div class="card-head">
@@ -172,11 +176,10 @@
         </div>
         <div class="card-price">
           <span class="value">${display}</span>
-          <span class="unit">${c.code}/USD</span>
         </div>
         <div class="card-foot">
           ${changeHtml}
-          <span class="muted">${c.code === 'USD' ? 'Base currency' : '1 USD =' }</span>
+          <span class="muted">1 ${c.code} → ILS</span>
         </div>
       `;
       grid.appendChild(card);
@@ -327,8 +330,8 @@
     $('#stk-updated').textContent = anyOk ? `Updated ${fmtTime()}` : 'Offline';
   }
 
-  // ---------- WALLET ----------
-  const WALLET_KEY = 'amosmoney.wallet.v1';
+  // ---------- WALLET (simplified) ----------
+  const WALLET_KEY = 'amosmoney.wallet.v2';
 
   function loadWallet() {
     try {
@@ -343,114 +346,48 @@
     try { localStorage.setItem(WALLET_KEY, JSON.stringify(state.wallet)); } catch {}
   }
 
+  const fmtILS = (n) => '₪ ' + fmtNum(n, 2);
+
   function renderWallet() {
     const list = $('#wallet-list');
     const empty = $('#wallet-empty');
     list.innerHTML = '';
 
-    let total = 0;
-    for (const h of state.wallet) total += (Number(h.amount) || 0) * (Number(h.value) || 0);
-    $('#wallet-total').textContent = fmtMoney(total, 'USD', 2);
-    $('#wallet-count').textContent = String(state.wallet.length);
+    const total = state.wallet.reduce((s, h) => s + (Number(h.value) || 0), 0);
+    $('#wallet-total').textContent = fmtILS(total);
 
-    if (state.wallet.length === 0) {
-      empty.hidden = false;
-      return;
-    }
-    empty.hidden = true;
+    empty.hidden = state.wallet.length > 0;
 
     for (const h of state.wallet) {
-      const card = document.createElement('div');
-      card.className = 'holding';
-      const subtotal = (Number(h.amount) || 0) * (Number(h.value) || 0);
-      card.innerHTML = `
-        <div class="holding-head">
-          <div>
-            <div class="holding-name"></div>
-            ${h.note ? '<div class="holding-note"></div>' : ''}
-          </div>
-          <div class="holding-actions">
-            <button class="icon-btn" data-act="edit" aria-label="Edit holding">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-            </button>
-            <button class="icon-btn" data-act="delete" aria-label="Delete holding">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-            </button>
-          </div>
-        </div>
-        <div class="holding-total">${fmtMoney(subtotal, 'USD', 2)}</div>
-        <div class="holding-meta">
-          <span>${fmtNum(Number(h.amount), 6)} × ${fmtMoney(Number(h.value), 'USD', 4)}</span>
-          <span>${total > 0 ? ((subtotal / total) * 100).toFixed(1) + '%' : '—'}</span>
-        </div>
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <span class="name"></span>
+        <span class="val">${fmtILS(Number(h.value) || 0)}</span>
+        <button class="del" aria-label="Delete">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
       `;
-      card.querySelector('.holding-name').textContent = h.name;
-      const noteEl = card.querySelector('.holding-note');
-      if (noteEl) noteEl.textContent = h.note;
-      card.querySelector('[data-act="edit"]').addEventListener('click', () => openModal(h.id));
-      card.querySelector('[data-act="delete"]').addEventListener('click', () => deleteHolding(h.id));
-      list.appendChild(card);
+      li.querySelector('.name').textContent = h.name;
+      li.querySelector('.del').addEventListener('click', () => {
+        state.wallet = state.wallet.filter(x => x.id !== h.id);
+        saveWallet();
+        renderWallet();
+      });
+      list.appendChild(li);
     }
   }
 
-  function deleteHolding(id) {
-    const h = state.wallet.find(x => x.id === id);
-    if (!h) return;
-    if (!confirm(`Delete "${h.name}"?`)) return;
-    state.wallet = state.wallet.filter(x => x.id !== id);
-    saveWallet();
-    renderWallet();
-  }
-
-  // ---------- MODAL ----------
-  const modal = $('#holding-modal');
-  const form = $('#holding-form');
-  let editingId = null;
-
-  function openModal(id = null) {
-    editingId = id;
-    form.reset();
-    $('#modal-title').textContent = id ? 'Edit Holding' : 'Add Holding';
-    $('#modal-save').textContent = id ? 'Save changes' : 'Save';
-    if (id) {
-      const h = state.wallet.find(x => x.id === id);
-      if (h) {
-        form.elements.name.value = h.name;
-        form.elements.amount.value = h.amount;
-        form.elements.value.value = h.value;
-        form.elements.note.value = h.note || '';
-      }
-    }
-    modal.setAttribute('aria-hidden', 'false');
-    setTimeout(() => form.elements.name.focus(), 50);
-  }
-  function closeModal() {
-    modal.setAttribute('aria-hidden', 'true');
-    editingId = null;
-  }
-
-  $('#wallet-add').addEventListener('click', () => openModal());
-  $$('#holding-modal [data-close]').forEach(el => el.addEventListener('click', closeModal));
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') closeModal();
-  });
-
-  form.addEventListener('submit', (e) => {
+  const walletForm = $('#wallet-form');
+  walletForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const name = form.elements.name.value.trim();
-    const amount = Number(form.elements.amount.value);
-    const value = Number(form.elements.value.value);
-    const note = form.elements.note.value.trim();
-    if (!name || !isFinite(amount) || !isFinite(value) || amount < 0 || value < 0) return;
-    if (editingId) {
-      const h = state.wallet.find(x => x.id === editingId);
-      if (h) Object.assign(h, { name, amount, value, note });
-    } else {
-      state.wallet.push({ id: uid(), name, amount, value, note, createdAt: Date.now() });
-    }
+    const name = walletForm.elements.name.value.trim();
+    const value = Number(walletForm.elements.value.value);
+    if (!name || !isFinite(value) || value < 0) return;
+    state.wallet.push({ id: uid(), name, value });
     saveWallet();
     renderWallet();
-    closeModal();
+    walletForm.reset();
+    walletForm.elements.name.focus();
   });
 
   // ---------- BOOT ----------
